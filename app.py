@@ -7,7 +7,7 @@ import base64
 from PIL import Image
 from io import BytesIO
 
-# --- 1. TRAJNO SHRANJEVANJE ---
+# --- 1. FUNKCIJE ZA PODATKE ---
 DB_FILE = "qai_users_data.json"
 
 def hash_password(password):
@@ -18,7 +18,10 @@ def load_data():
         try:
             with open(DB_FILE, "r", encoding="utf-8") as f:
                 d = json.load(f)
-                if "users" not in d: d = {"users": {}, "folders": {}, "user_settings": {}}
+                # Varnostni popravek: zagotovi, da vsi ključi obstajajo
+                if "users" not in d: d["users"] = {}
+                if "folders" not in d: d["folders"] = {}
+                if "user_settings" not in d: d["user_settings"] = {}
                 return d
         except: return {"users": {}, "folders": {}, "user_settings": {}}
     return {"users": {}, "folders": {}, "user_settings": {}}
@@ -27,184 +30,175 @@ def save_data(data):
     with open(DB_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
 
-# --- 2. NASTAVITVE IN STIL ---
+# --- 2. STIL IN TEMA ---
 st.set_page_config(page_title="Qai", layout="centered")
 
-# Dinamični CSS glede na Light/Dark mode
-def apply_theme(dark_mode):
-    bg = "#121212" if dark_mode else "#FFFFFF"
+def apply_custom_styles(dark_mode):
+    bg = "#0E1117" if dark_mode else "#FFFFFF"
     txt = "#FFFFFF" if dark_mode else "#000000"
-    card_bg = "#1E1E1E" if dark_mode else "#F9F9F9"
-    border = "#333" if dark_mode else "#EEE"
+    card = "#161B22" if dark_mode else "#F0F2F6"
     
     st.markdown(f"""
     <style>
         .stApp {{ background-color: {bg}; color: {txt}; }}
+        /* Popravek za gumbe: celo besedilo brez lomljenja */
         div.stButton > button {{
-            width: 100% !important; min-height: 50px !important;
-            border-radius: 10px; font-weight: bold; white-space: nowrap !important;
+            width: 100% !important; min-height: 45px !important;
+            white-space: nowrap !important; overflow: hidden !important;
+            text-overflow: ellipsis !important; display: block !important;
         }}
-        .folder-container {{
-            display: flex; align-items: center; background: {card_bg}; 
-            border-radius: 12px; margin-bottom: 5px; padding: 10px; border: 1px solid {border};
+        .folder-box {{
+            display: flex; align-items: center; background: {card}; 
+            border-radius: 10px; padding: 12px; border: 1px solid #30363D; margin-bottom: 10px;
         }}
-        .color-tab {{ width: 6px; height: 35px; border-radius: 3px; margin-right: 15px; }}
-        .flip-btn > button {{
-            height: 280px !important; background-color: {card_bg} !important;
-            color: {txt} !important; border: 1px solid {border} !important; font-size: 20px !important;
-        }}
+        .color-tab {{ width: 6px; height: 30px; border-radius: 3px; margin-right: 15px; }}
     </style>
     """, unsafe_allow_html=True)
 
-# --- 3. INICIALIZACIJA ---
+# --- 3. LOGIKA APLIKACIJE ---
 data = load_data()
 if 'logged_in' not in st.session_state: st.session_state.logged_in = False
 if 'user' not in st.session_state: st.session_state.user = None
 if 'page' not in st.session_state: st.session_state.page = "login"
 
-# AI nastavitve
-MOJ_KLJUC = "AIzaSyCAcL8sBxKVyDW-QW6z06lm56WaQ-9tTUY"
-genai.configure(api_key=MOJ_KLJUC)
+# Povezava z AI
+genai.configure(api_key="AIzaSyCAcL8sBxKVyDW-QW6z06lm56WaQ-9tTUY")
 model = genai.GenerativeModel('models/gemini-2.5-flash')
 
 # --- 4. STRANI ---
 
+# --- PRIJAVA / REGISTRACIJA ---
 if not st.session_state.logged_in:
-    st.title("🔐 Dobrodošel v Qai")
-    t_log, t_reg = st.tabs(["Prijava", "Registracija"])
-    with t_log:
-        u_l = st.text_input("Uporabnik")
-        p_l = st.text_input("Geslo", type="password")
+    st.title("🚀 Qai Vstop")
+    t1, t2 = st.tabs(["Prijava", "Registracija"])
+    with t1:
+        ul = st.text_input("Uporabniško ime", key="l_u")
+        pl = st.text_input("Geslo", type="password", key="l_p")
         if st.button("Vstopi"):
-            if u_l in data["users"] and data["users"][u_l] == hash_password(p_l):
-                st.session_state.logged_in, st.session_state.user, st.session_state.page = True, u_l, "home"
+            if ul in data["users"] and data["users"][ul] == hash_password(pl):
+                st.session_state.logged_in, st.session_state.user = True, ul
+                st.session_state.page = "home"
                 st.rerun()
             else: st.error("Napačni podatki.")
-    with t_reg:
-        u_r = st.text_input("Novo ime")
-        p_r = st.text_input("Novo geslo", type="password")
-        if st.button("Registriraj"):
-            if u_r and p_r and u_r not in data["users"]:
-                data["users"][u_r] = hash_password(p_r)
-                data["folders"][u_r] = {}
-                data["user_settings"][u_r] = {"dark_mode": True, "pfp": None}
-                save_data(data); st.success("Ustvarjeno!")
+    with t2:
+        ur = st.text_input("Izberi ime", key="r_u")
+        pr = st.text_input("Izberi geslo", type="password", key="r_p")
+        if st.button("Ustvari račun"):
+            if ur and pr and ur not in data["users"]:
+                data["users"][ur] = hash_password(pr)
+                data["folders"][ur] = {}
+                data["user_settings"][ur] = {"dark_mode": True, "pfp": None}
+                save_data(data); st.success("Račun ustvarjen! Zdaj se prijavi.")
 
+# --- PRIJAVLJEN UPORABNIK ---
 else:
-    # Nalaganje nastavitev uporabnika
-    user_settings = data["user_settings"].get(st.session_state.user, {"dark_mode": True, "pfp": None})
-    apply_theme(user_settings.get("dark_mode", True))
+    # Varno nalaganje nastavitev (Prepreči KeyError)
+    u_name = st.session_state.user
+    if u_name not in data["user_settings"]:
+        data["user_settings"][u_name] = {"dark_mode": True, "pfp": None}
+        save_data(data)
+    
+    settings = data["user_settings"][u_name]
+    apply_custom_styles(settings.get("dark_mode", True))
 
-    # --- DESNI PROFILNI MENI ---
+    # Sidebar profil
     with st.sidebar:
-        if user_settings.get("pfp"):
-            st.image(user_settings["pfp"], width=100)
-        st.title(f"👤 {st.session_state.user}")
+        if settings.get("pfp"):
+            st.image(settings["pfp"], width=80)
+        st.write(f"**Uporabnik: {u_name}**")
         if st.button("🏠 Domov"): st.session_state.page = "home"; st.rerun()
-        if st.button("⚙️ Nastavitve profila"): st.session_state.page = "profile"; st.rerun()
+        if st.button("⚙️ Nastavitve"): st.session_state.page = "profile"; st.rerun()
         st.divider()
-        if st.button("🚪 Odjava"): 
-            st.session_state.logged_in = False
-            st.rerun()
+        if st.button("🚪 Odjava"): st.session_state.logged_in = False; st.rerun()
 
-    # --- STRAN PROFIL ---
+    # STRAN: PROFIL
     if st.session_state.page == "profile":
-        st.header("⚙️ Nastavitve profila")
+        st.subheader("Uredi profil")
         
-        # 1. Dark Mode
-        dm = st.toggle("Dark Mode", value=user_settings.get("dark_mode", True))
-        if dm != user_settings.get("dark_mode"):
-            data["user_settings"][st.session_state.user]["dark_mode"] = dm
+        # Dark mode preklop
+        new_dm = st.toggle("Dark Mode", value=settings.get("dark_mode", True))
+        if new_dm != settings.get("dark_mode"):
+            data["user_settings"][u_name]["dark_mode"] = new_dm
             save_data(data); st.rerun()
+            
+        # Profilna slika
+        img_up = st.file_uploader("Naloži sliko", type=['jpg', 'png'])
+        if img_up:
+            img = Image.open(img_up)
+            img.thumbnail((150, 150))
+            buf = BytesIO()
+            img.save(buf, format="PNG")
+            data["user_settings"][u_name]["pfp"] = f"data:image/png;base64,{base64.b64encode(buf.getvalue()).decode()}"
+            save_data(data); st.success("Slika shranjena!"); st.rerun()
 
-        # 2. Profilna slika
-        img_file = st.file_uploader("Naloži profilno sliko", type=['png', 'jpg', 'jpeg'])
-        if img_file:
-            img = Image.open(img_file)
-            buffered = BytesIO()
-            img.save(buffered, format="PNG")
-            img_str = base64.b64encode(buffered.getvalue()).decode()
-            data["user_settings"][st.session_state.user]["pfp"] = f"data:image/png;base64,{img_str}"
-            save_data(data); st.success("Slika posodobljena!"); st.rerun()
+        # Menjava gesla
+        new_pass = st.text_input("Novo geslo", type="password")
+        if st.button("Posodobi geslo") and new_pass:
+            data["users"][u_name] = hash_password(new_pass)
+            save_data(data); st.success("Geslo spremenjeno!")
 
-        # 3. Uporabniško ime in Geslo
-        new_u = st.text_input("Novo uporabniško ime", st.session_state.user)
-        new_p = st.text_input("Novo geslo (pusti prazno, če ne želiš menjati)", type="password")
-        
-        if st.button("Shrani spremembe profila"):
-            if new_u != st.session_state.user:
-                data["users"][new_u] = data["users"].pop(st.session_state.user)
-                data["folders"][new_u] = data["folders"].pop(st.session_state.user)
-                data["user_settings"][new_u] = data["user_settings"].pop(st.session_state.user)
-                st.session_state.user = new_u
-            if new_p:
-                data["users"][st.session_state.user] = hash_password(new_p)
-            save_data(data); st.success("Profil posodobljen!")
-
-    # --- STRAN DOMOV ---
+    # STRAN: DOMOV
     elif st.session_state.page == "home":
         st.title("📂 Moje mape")
-        col_a, col_b = st.columns(2)
-        with col_a.expander("✨ AI"):
-            fn_ai = st.text_input("Ime")
-            vir_ai = st.text_area("Snov")
+        
+        c1, c2 = st.columns(2)
+        with c1.expander("✨ AI Ustvari"):
+            fn = st.text_input("Ime mape")
+            txt = st.text_area("Snov")
             if st.button("Generiraj"):
-                res = model.generate_content(f"Format: Vprašanje|Odgovor. Vir: {vir_ai}")
-                cards = [{"q": l.split("|")[0].strip(), "a": l.split("|")[1].strip(), "known": False} 
-                         for l in res.text.strip().split('\n') if "|" in l]
-                data["folders"][st.session_state.user][fn_ai] = {"cards": cards, "color": "#4A90E2"}
+                res = model.generate_content(f"Format: Q|A. Vir: {txt}")
+                cards = [{"q": l.split("|")[0], "a": l.split("|")[1], "known": False} for l in res.text.split('\n') if "|" in l]
+                data["folders"][u_name][fn] = {"cards": cards, "color": "#4A90E2"}
                 save_data(data); st.rerun()
-        with col_b.expander("📁 Ročno"):
-            fn_m = st.text_input("Ime ")
-            if st.button("Ustvari"):
-                data["folders"][st.session_state.user][fn_m] = {"cards": [{"q":"", "a":""}], "color": "#9B59B6"}
+                
+        with c2.expander("📁 Ročno Ustvari"):
+            fn_m = st.text_input("Ime mape ")
+            if st.button("Ustvari prazno"):
+                data["folders"][u_name][fn_m] = {"cards": [], "color": "#9B59B6"}
                 save_data(data); st.session_state.edit_folder = fn_m; st.session_state.page = "edit"; st.rerun()
 
         st.divider()
-        user_folders = data["folders"].get(st.session_state.user, {})
-        for f_name, folder in user_folders.items():
-            st.markdown(f'<div class="folder-container"><div class="color-tab" style="background-color: {folder.get("color", "#4A90E2")};"></div><div><b>{f_name}</b></div></div>', unsafe_allow_html=True)
-            c1, c2, c3 = st.columns([1, 1, 0.2])
-            if c1.button("📖 Uči", key=f"l_{f_name}"):
-                st.session_state.current_folder, st.session_state.page, st.session_state.card_index = f_name, "learning", 0
-                st.rerun()
-            if c2.button("📝 Test", key=f"t_{f_name}"):
-                st.session_state.current_folder, st.session_state.page, st.session_state.card_index = f_name, "testing", 0
-                st.rerun()
-            if c3.button("⋮", key=f"o_{f_name}"):
-                st.session_state.edit_folder, st.session_state.page = f_name, "edit"
-                st.rerun()
+        
+        # Prikaz map
+        folders = data["folders"].get(u_name, {})
+        for f_name, f_data in folders.items():
+            st.markdown(f"""<div class="folder-box">
+                <div class="color-tab" style="background-color: {f_data.get('color', '#4A90E2')};"></div>
+                <div style="flex-grow:1"><b>{f_name}</b></div>
+            </div>""", unsafe_allow_html=True)
+            
+            with st.expander("Odpri možnosti"):
+                col1, col2, col3 = st.columns([1, 1, 0.4])
+                if col1.button("📖 Uči", key=f"l_{f_name}"):
+                    st.session_state.current_folder, st.session_state.page, st.session_state.card_index = f_name, "learning", 0
+                    st.rerun()
+                if col2.button("📝 Test", key=f"t_{f_name}"):
+                    st.session_state.current_folder, st.session_state.page, st.session_state.card_index = f_name, "testing", 0
+                    st.rerun()
+                if col3.button("⋮", key=f"e_{f_name}"):
+                    st.session_state.edit_folder, st.session_state.page = f_name, "edit"
+                    st.rerun()
 
-    # --- STRAN ZA UREJANJE ---
+    # STRAN: UREJANJE
     elif st.session_state.page == "edit":
-        f_old = st.session_state.edit_folder
-        folder = data["folders"][st.session_state.user][f_old]
-        st.subheader(f"⚙️ {f_old}")
-        new_n = st.text_input("Ime", f_old)
-        new_c = st.color_picker("Barva", folder.get("color", "#4A90E2"))
-        for i, card in enumerate(folder["cards"]):
+        f_target = st.session_state.edit_folder
+        f_obj = data["folders"][u_name][f_target]
+        st.subheader(f"Urejanje: {f_target}")
+        
+        new_name = st.text_input("Ime", f_target)
+        new_col = st.color_picker("Barva", f_obj.get("color", "#4A90E2"))
+        
+        for i, card in enumerate(f_obj["cards"]):
             c_q, c_a, c_d = st.columns([1, 1, 0.2])
-            folder["cards"][i]["q"] = c_q.text_input(f"V", card["q"], key=f"q{i}")
-            folder["cards"][i]["a"] = c_a.text_input(f"O", card["a"], key=f"a{i}")
-            if c_d.button("🗑️", key=f"d{i}"): folder["cards"].pop(i); save_data(data); st.rerun()
-        if st.button("➕ Dodaj"): folder["cards"].append({"q":"","a":""}); save_data(data); st.rerun()
+            f_obj["cards"][i]["q"] = c_q.text_input(f"Vpr {i}", card["q"], key=f"q{i}")
+            f_obj["cards"][i]["a"] = c_a.text_input(f"Odg {i}", card["a"], key=f"a{i}")
+            if c_d.button("🗑️", key=f"d{i}"): f_obj["cards"].pop(i); save_data(data); st.rerun()
+            
+        if st.button("➕ Dodaj kartico"):
+            f_obj["cards"].append({"q": "", "a": "", "known": False})
+            save_data(data); st.rerun()
+            
         if st.button("💾 Shrani"):
-            del data["folders"][st.session_state.user][f_old]
-            data["folders"][st.session_state.user][new_n] = {"cards": folder["cards"], "color": new_c}
+            del data["folders"][u_name][f_target]
+            data["folders"][u_name][new_name] = {"cards": f_obj["cards"], "color": new_col}
             save_data(data); st.session_state.page = "home"; st.rerun()
-
-    # --- STRAN ZA UČENJE ---
-    elif st.session_state.page == "learning":
-        cards = data["folders"][st.session_state.user][st.session_state.current_folder]["cards"]
-        if st.button("🏠"): st.session_state.page = "home"; st.rerun()
-        if st.session_state.card_index < len(cards):
-            card = cards[st.session_state.card_index]
-            st.markdown('<div class="flip-btn">', unsafe_allow_html=True)
-            if st.button(card['a'] if st.session_state.get('flipped') else card['q']):
-                st.session_state.flipped = not st.session_state.get('flipped', False)
-                st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
-            c1, c2 = st.columns(2)
-            if c1.button("✅"): st.session_state.card_index += 1; st.session_state.flipped = False; st.rerun()
-            if c2.button("❌"): st.session_state.card_index += 1; st.session_state.flipped = False; st.rerun()
-        else: st.success("Konec!"); st.button("Nazaj", on_click=lambda: setattr(st.session_state, 'page', 'home'))
