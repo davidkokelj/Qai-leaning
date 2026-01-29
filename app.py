@@ -7,7 +7,7 @@ import base64
 from PIL import Image
 from io import BytesIO
 
-# --- 1. PODATKI IN VARNOST ---
+# --- 1. PODATKI ---
 DB_FILE = "qai_users_data.json"
 
 def hash_password(password):
@@ -20,11 +20,6 @@ def load_data():
                 d = json.load(f)
                 for key in ["users", "folders", "user_settings"]:
                     if key not in d: d[key] = {}
-                # Varnostni popravek za obstoječe kartice
-                for u in d["folders"]:
-                    for f in d["folders"][u]:
-                        for c in d["folders"][u][f].get("cards", []):
-                            if "known" not in c: c["known"] = False
                 return d
         except: return {"users": {}, "folders": {}, "user_settings": {}}
     return {"users": {}, "folders": {}, "user_settings": {}}
@@ -33,7 +28,7 @@ def save_data(data):
     with open(DB_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
 
-# --- 2. STIL (Pokončna črta in Sidebar) ---
+# --- 2. STIL ---
 st.set_page_config(page_title="Qai", layout="centered")
 
 def apply_styles(dark_mode):
@@ -50,6 +45,7 @@ def apply_styles(dark_mode):
         .flashcard-ui {{
             background: {card}; padding: 40px; border-radius: 15px;
             text-align: center; border: 1px solid #30363d; font-size: 20px;
+            margin-bottom: 20px;
         }}
     </style>
     """, unsafe_allow_html=True)
@@ -57,13 +53,13 @@ def apply_styles(dark_mode):
 # --- 3. INICIALIZACIJA ---
 data = load_data()
 if 'logged_in' not in st.session_state: st.session_state.logged_in = False
-if 'page' not in st.session_state: st.session_state.page = "login"
+if 'page' not in st.session_state: st.session_state.page = "home"
 if 'flipped' not in st.session_state: st.session_state.flipped = False
 
 genai.configure(api_key="AIzaSyCAcL8sBxKVyDW-QW6z06lm56WaQ-9tTUY")
-model = genai.GenerativeModel('models/gemini-2.5-flash')
+model = genai.GenerativeModel('gemini-1.5-flash') # Podpora za slike
 
-# --- 4. STRANI ---
+# --- 4. LOGIKA ---
 
 if not st.session_state.logged_in:
     st.title("🚀 Qai")
@@ -72,7 +68,7 @@ if not st.session_state.logged_in:
         u, p = st.text_input("Uporabnik"), st.text_input("Geslo", type="password")
         if st.button("Vstop"):
             if u in data["users"] and data["users"][u] == hash_password(p):
-                st.session_state.logged_in, st.session_state.user, st.session_state.page = True, u, "home"
+                st.session_state.logged_in, st.session_state.user = True, u
                 st.rerun()
     with t2:
         ur, fn, ln, pr = st.text_input("Up. ime"), st.text_input("Ime"), st.text_input("Priimek"), st.text_input("Geslo ", type="password")
@@ -80,7 +76,7 @@ if not st.session_state.logged_in:
             if ur and pr:
                 data["users"][ur] = hash_password(pr)
                 data["folders"][ur], data["user_settings"][ur] = {}, {"dark_mode": True, "full_name": f"{fn} {ln}"}
-                save_data(data); st.success("Pripravljen!")
+                save_data(data); st.success("Račun ustvarjen!")
 
 else:
     u_name = st.session_state.user
@@ -94,43 +90,58 @@ else:
         st.divider()
         if st.button("🚪 Odjava"): st.session_state.logged_in = False; st.rerun()
 
-    # --- DOMOV (Mape in AI vnos) ---
+    # --- DOMOV ---
     if st.session_state.page == "home":
         st.title("Moje mape")
-        c1, c2 = st.columns(2)
-        with c1.expander("✨ Ustvari z AI"):
-            fn_ai = st.text_input("Ime mape")
-            txt_ai = st.text_area("Snov za generiranje") # Popravek: manjkajoč okvir
-            if st.button("Generiraj"):
-                res = model.generate_content(f"Ustvari Q|A kartice. Format: Vprašanje|Odgovor. Vir: {txt_ai}")
-                cards = [{"q": l.split("|")[0], "a": l.split("|")[1], "known": False} for l in res.text.split('\n') if "|" in l]
-                data["folders"][u_name][fn_ai] = {"cards": cards, "color": "#4A90E2"}
-                save_data(data); st.rerun()
         
-        with c2.expander("📁 Ustvari ročno"):
-            fn_m = st.text_input("Ime nove mape")
-            if st.button("Ustvari"):
+        tab_ai, tab_img, tab_man = st.tabs(["✨ Avtomatsko dodajanje", "📸 Dodaj z Qai", "📁 Ročno"])
+        
+        with tab_ai:
+            fn_ai = st.text_input("Ime mape", key="ai_n")
+            txt_ai = st.text_area("Prilepi snov (besedilo)", key="ai_t")
+            if st.button("Generiraj iz besedila"):
+                with st.spinner("Qai bere besedilo..."):
+                    res = model.generate_content(f"Ustvari Q|A kartice. Format: Vprašanje|Odgovor. Vir: {txt_ai}")
+                    cards = [{"q": l.split("|")[0], "a": l.split("|")[1], "known": False} for l in res.text.split('\n') if "|" in l]
+                    data["folders"][u_name][fn_ai] = {"cards": cards, "color": "#4A90E2"}
+                    save_data(data); st.rerun()
+
+        with tab_img:
+            fn_img = st.text_input("Ime mape", key="img_n")
+            uploaded_images = st.file_uploader("Naloži slike snovi ali vprašanj", type=['png', 'jpg', 'jpeg'], accept_multiple_files=True)
+            if st.button("Skeniraj slike z Qai"):
+                if uploaded_images:
+                    with st.spinner("Qai analizira slike..."):
+                        all_cards = []
+                        for img_file in uploaded_images:
+                            img = Image.open(img_file)
+                            res = model.generate_content(["Iz te slike razberi snov in ustvari vprašanja in odgovore. Format: Vprašanje|Odgovor.", img])
+                            cards = [{"q": l.split("|")[0], "a": l.split("|")[1], "known": False} for l in res.text.split('\n') if "|" in l]
+                            all_cards.extend(cards)
+                        data["folders"][u_name][fn_img] = {"cards": all_cards, "color": "#FF4B4B"}
+                        save_data(data); st.rerun()
+
+        with tab_man:
+            fn_m = st.text_input("Ime nove mape", key="m_n")
+            if st.button("Ustvari prazno mapo"):
                 data["folders"][u_name][fn_m] = {"cards": [], "color": "#9B59B6"}
                 save_data(data); st.session_state.edit_folder, st.session_state.page = fn_m, "edit"; st.rerun()
 
         st.divider()
+        # Izris map s pokončno črto
         for f_name, f_data in data["folders"].get(u_name, {}).items():
             color = f_data.get("color", "#4A90E2")
-            # Vizualna barvna črta
             st.markdown(f'<div class="folder-header-ui"><div class="v-line" style="background:{color}"></div><b>📁 {f_name}</b></div>', unsafe_allow_html=True)
             with st.expander(""):
-                col1, col2, col3 = st.columns([1, 1, 0.4])
-                if col1.button("📖 Uči", key=f"l_{f_name}"):
-                    st.session_state.current_folder, st.session_state.page, st.session_state.card_index = f_name, "learning", 0
-                    st.rerun()
-                if col2.button("📝 Test", key=f"t_{f_name}"):
-                    st.session_state.current_folder, st.session_state.page, st.session_state.card_index = f_name, "testing", 0
-                    st.rerun()
-                if col3.button("⋮", key=f"e_{f_name}"):
-                    st.session_state.edit_folder, st.session_state.page = f_name, "edit"
-                    st.rerun()
+                c1, c2, c3 = st.columns([1, 1, 0.4])
+                if c1.button("📖 Uči", key=f"l_{f_name}"):
+                    st.session_state.current_folder, st.session_state.page, st.session_state.card_index = f_name, "learning", 0; st.rerun()
+                if c2.button("📝 Test", key=f"t_{f_name}"):
+                    st.session_state.current_folder, st.session_state.page, st.session_state.card_index = f_name, "testing", 0; st.rerun()
+                if c3.button("⋮", key=f"e_{f_name}"):
+                    st.session_state.edit_folder, st.session_state.page = f_name, "edit"; st.rerun()
 
-    # --- UREJANJE (Minimiziranje in Izbris) ---
+    # --- UREJANJE ---
     elif st.session_state.page == "edit":
         target = st.session_state.edit_folder
         f_obj = data["folders"][u_name][target]
@@ -139,71 +150,41 @@ else:
         new_color = st.color_picker("Barva črte", f_obj.get("color", "#4A90E2"))
         
         for i, card in enumerate(f_obj["cards"]):
-            with st.expander(f"Kartica {i+1}: {card['q'][:20]}..."): # Minimiziranje
-                f_obj["cards"][i]["q"] = st.text_input(f"V {i}", card["q"])
-                f_obj["cards"][i]["a"] = st.text_input(f"O {i}", card["a"])
-                if st.button(f"🗑️ Odstrani kartico {i+1}"):
+            with st.expander(f"Kartica {i+1}: {card['q'][:30]}..."):
+                f_obj["cards"][i]["q"] = st.text_input(f"Vprašanje {i}", card["q"])
+                f_obj["cards"][i]["a"] = st.text_input(f"Odgovor {i}", card["a"])
+                if st.button(f"🗑️ Izbriši kartico {i+1}"):
                     f_obj["cards"].pop(i); save_data(data); st.rerun()
         
-        if st.button("➕ Dodaj kartico"):
-            f_obj["cards"].append({"q": "Novo vprašanje", "a": "Odgovor", "known": False})
-            save_data(data); st.rerun()
-        
         st.divider()
+        if st.button("➕ Dodaj kartico"):
+            f_obj["cards"].append({"q": "", "a": "", "known": False}); save_data(data); st.rerun()
+        
         c_s, c_d = st.columns(2)
         if c_s.button("💾 Shrani"):
             data["folders"][u_name][new_name] = {"cards": f_obj["cards"], "color": new_color}
             if new_name != target: del data["folders"][u_name][target]
             save_data(data); st.session_state.page = "home"; st.rerun()
-        if c_d.button("🔥 IZBRIŠI CELO MAPO"): # Izbris mape
-            del data["folders"][u_name][target]
-            save_data(data); st.session_state.page = "home"; st.rerun()
+        if c_d.button("🔥 IZBRIŠI MAPO"):
+            del data["folders"][u_name][target]; save_data(data); st.session_state.page = "home"; st.rerun()
 
-    # --- UČENJE IN TEST (Popravljeno) ---
-    elif st.session_state.page in ["learning", "testing"]:
+    # --- UČENJE ---
+    elif st.session_state.page == "learning":
         folder = data["folders"][u_name][st.session_state.current_folder]
         cards = folder["cards"]
         if st.button("⬅️ Nazaj"): st.session_state.page = "home"; st.rerun()
         
         if st.session_state.card_index < len(cards):
             card = cards[st.session_state.card_index]
-            # Interaktivna kartica
             txt = card["a"] if st.session_state.flipped else card["q"]
             st.markdown(f'<div class="flashcard-ui">{txt}</div>', unsafe_allow_html=True)
-            if st.button("Obrni kartico"): 
-                st.session_state.flipped = not st.session_state.flipped
-                st.rerun()
+            if st.button("Obrni"): st.session_state.flipped = not st.session_state.flipped; st.rerun()
             
             c1, c2 = st.columns(2)
             if c1.button("✅ Znam"):
-                card["known"] = True
-                st.session_state.card_index += 1; st.session_state.flipped = False
-                save_data(data); st.rerun()
+                st.session_state.card_index += 1; st.session_state.flipped = False; st.rerun()
             if c2.button("❌ Ne znam"):
-                card["known"] = False
-                st.session_state.card_index += 1; st.session_state.flipped = False
-                save_data(data); st.rerun()
+                st.session_state.card_index += 1; st.session_state.flipped = False; st.rerun()
         else:
-            st.success("Končano!")
+            st.success("Mapa končana!")
             if st.button("Ponovi"): st.session_state.card_index = 0; st.rerun()
-
-    # --- PROFIL (Svetli/Temni način in Slika) ---
-    elif st.session_state.page == "profile":
-        st.header("Profil")
-        new_dm = st.toggle("Temni način", value=settings.get("dark_mode", True))
-        if st.button("Shrani nastavitve"):
-            data["user_settings"][u_name]["dark_mode"] = new_dm
-            save_data(data); st.rerun()
-        
-        up = st.file_uploader("Profilna slika", type=['png', 'jpg'])
-        if up:
-            img = Image.open(up)
-            # Kvadratni izrez
-            w, h = img.size
-            min_d = min(w, h)
-            img = img.crop(((w-min_d)//2, (h-min_d)//2, (w+min_d)//2, (h+min_d)//2))
-            img.thumbnail((150, 150))
-            buf = BytesIO()
-            img.save(buf, format="PNG")
-            data["user_settings"][u_name]["pfp"] = f"data:image/png;base64,{base64.b64encode(buf.getvalue()).decode()}"
-            save_data(data); st.success("Slika posodobljena!"); st.rerun()
