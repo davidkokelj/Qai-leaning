@@ -4,7 +4,7 @@ import json
 import os
 import hashlib
 
-# --- 1. TRAJNO SHRANJEVANJE IN VARNOST ---
+# --- 1. TRAJNO SHRANJEVANJE ---
 DB_FILE = "qai_users_data.json"
 
 def hash_password(password):
@@ -14,9 +14,10 @@ def load_data():
     if os.path.exists(DB_FILE):
         try:
             with open(DB_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except:
-            return {"users": {}, "folders": {}}
+                d = json.load(f)
+                if "users" not in d: d = {"users": {}, "folders": {}}
+                return d
+        except: return {"users": {}, "folders": {}}
     return {"users": {}, "folders": {}}
 
 def save_data(data):
@@ -30,8 +31,8 @@ st.markdown("""
 <style>
     div.stButton > button {
         display: block; margin: 0 auto; width: 100% !important;
-        min-height: 70px !important; border-radius: 15px;
-        font-size: 20px !important; font-weight: bold;
+        min-height: 60px !important; border-radius: 12px;
+        font-size: 18px !important; font-weight: bold;
         white-space: nowrap !important;
     }
     .flip-btn > button {
@@ -39,119 +40,131 @@ st.markdown("""
         background-color: #ffffff !important; color: #1f1f1f !important;
         border: 2px solid #e6e9ef !important;
     }
-    .status-box {
-        padding: 10px; border-radius: 10px; background-color: #f0f2f6;
-        margin-bottom: 20px; text-align: center; font-weight: bold;
+    .folder-card {
+        padding: 15px; border-radius: 15px; border-left: 10px solid #ccc;
+        margin-bottom: 10px; background-color: #f9f9f9;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# --- 3. INICIALIZACIJA STANJA ---
+# --- 3. INICIALIZACIJA ---
 data = load_data()
-
 if 'logged_in' not in st.session_state: st.session_state.logged_in = False
 if 'user' not in st.session_state: st.session_state.user = None
 if 'page' not in st.session_state: st.session_state.page = "login"
 if 'card_index' not in st.session_state: st.session_state.card_index = 0
 if 'flipped' not in st.session_state: st.session_state.flipped = False
 
-# POVEZAVA Z AI
 MOJ_KLJUC = "AIzaSyCAcL8sBxKVyDW-QW6z06lm56WaQ-9tTUY"
 genai.configure(api_key=MOJ_KLJUC)
 model = genai.GenerativeModel('models/gemini-2.5-flash')
 
 # --- 4. STRANI ---
 
-# --- PRIJAVA / REGISTRACIJA ---
 if not st.session_state.logged_in:
     st.title("🔐 Qai Prijava")
-    tab1, tab2 = st.tabs(["Prijava", "Registracija"])
-    
-    with tab1:
-        u_name = st.text_input("Uporabniško ime", key="login_u")
-        u_pass = st.text_input("Geslo", type="password", key="login_p")
+    t1, t2 = st.tabs(["Prijava", "Registracija"])
+    with t1:
+        u = st.text_input("Uporabniško ime")
+        p = st.text_input("Geslo", type="password")
         if st.button("Vstopi"):
-            hashed_p = hash_password(u_pass)
-            if u_name in data["users"] and data["users"][u_name] == hashed_p:
-                st.session_state.logged_in = True
-                st.session_state.user = u_name
-                st.session_state.page = "home"
+            if u in data["users"] and data["users"][u] == hash_password(p):
+                st.session_state.logged_in, st.session_state.user, st.session_state.page = True, u, "home"
                 st.rerun()
-            else:
-                st.error("Napačno ime ali geslo.")
-                
-    with tab2:
-        new_u = st.text_input("Izberi uporabniško ime", key="reg_u")
-        new_p = st.text_input("Izberi geslo", type="password", key="reg_p")
+            else: st.error("Napačni podatki.")
+    with t2:
+        nu = st.text_input("Novo ime")
+        np = st.text_input("Novo geslo", type="password")
         if st.button("Ustvari račun"):
-            if new_u in data["users"]:
-                st.warning("Uporabnik že obstaja.")
-            elif new_u and new_p:
-                data["users"][new_u] = hash_password(new_p)
-                data["folders"][new_u] = {} # Pripravimo prostor za njegove mape
-                save_data(data)
-                st.success("Račun ustvarjen! Zdaj se lahko prijaviš.")
-            else:
-                st.error("Izpolni vsa polja.")
+            if nu and np and nu not in data["users"]:
+                data["users"][nu], data["folders"][nu] = hash_password(np), {}
+                save_data(data); st.success("Račun ustvarjen!")
+            else: st.error("Napaka pri registraciji.")
 
-# --- DOMOV (Ko je uporabnik prijavljen) ---
 elif st.session_state.page == "home":
     st.title(f"👋 Zdravo, {st.session_state.user}!")
     if st.sidebar.button("Odjava"):
         st.session_state.logged_in = False
-        st.session_state.user = None
         st.rerun()
 
     user_folders = data["folders"].get(st.session_state.user, {})
 
     with st.expander("✨ Ustvari novo mapo z AI"):
-        fname = st.text_input("Ime mape")
-        vpr = st.text_area("Vprašanja")
-        vir = st.text_area("Vir besedila")
-        if st.button("Ustvari"):
-            if fname and vpr and vir:
-                with st.spinner("Qai ustvarja..."):
-                    res = model.generate_content(f"Format: Vprašanje|Odgovor. Vir: {vir}. Teme: {vpr}")
-                    cards = [{"q": l.split("|")[0].strip(), "a": l.split("|")[1].strip(), "known": False} 
-                             for l in res.text.strip().split('\n') if "|" in l]
-                    if cards:
-                        data["folders"][st.session_state.user][fname] = cards
-                        save_data(data)
-                        st.rerun()
+        fn = st.text_input("Ime mape")
+        vpr_ai = st.text_area("Vprašanja za AI")
+        vir_ai = st.text_area("Snov / Gradivo")
+        if st.button("Generiraj"):
+            with st.spinner("Qai ustvarja..."):
+                res = model.generate_content(f"Format: Vprašanje|Odgovor. Vir: {vir_ai}. Teme: {vpr_ai}")
+                cards = [{"q": l.split("|")[0].strip(), "a": l.split("|")[1].strip(), "known": False} 
+                         for l in res.text.strip().split('\n') if "|" in l]
+                if cards:
+                    data["folders"][st.session_state.user][fn] = {"cards": cards, "color": "#4A90E2", "source": vir_ai, "prompts": vpr_ai}
+                    save_data(data); st.rerun()
 
     st.divider()
-    for f_name, cards in user_folders.items():
-        znam_st = sum(1 for c in cards if c.get('known', False))
-        col1, col2, col3, col4 = st.columns([2, 0.8, 0.8, 0.4])
-        col1.markdown(f"📁 **{f_name}** (`{znam_st}/{len(cards)}`)")
-        if col2.button("📖 Uči", key=f"l_{f_name}"): 
-            st.session_state.current_folder = f_name
-            st.session_state.page = "learning"
-            st.session_state.card_index = 0
-            st.rerun()
-        if col3.button("📝 Test", key=f"t_{f_name}"): 
-            st.session_state.current_folder = f_name
-            st.session_state.page = "testing"
-            st.session_state.card_index = 0
-            st.rerun()
-        if col4.button("🗑️", key=f"del_{f_name}"):
-            del data["folders"][st.session_state.user][f_name]
-            save_data(data)
-            st.rerun()
-
-# --- UČENJE ---
-elif st.session_state.page == "learning":
-    user_folders = data["folders"][st.session_state.user]
-    folder = user_folders[st.session_state.current_folder]
     
+    for f_name in list(user_folders.keys()):
+        folder = user_folders[f_name]
+        # Če je stara verzija podatkov, popravi strukturo
+        if "cards" not in folder: folder = {"cards": folder, "color": "#4A90E2", "source": "", "prompts": ""}
+        
+        znam = sum(1 for c in folder["cards"] if c["known"])
+        
+        # Vizualna kartica mape
+        st.markdown(f"""<div class='folder-card' style='border-left-color: {folder['color']};'>
+            <h3 style='margin:0;'>📁 {f_name}</h3>
+            <p style='margin:0;'>Napredek: {znam}/{len(folder['cards'])}</p>
+        </div>""", unsafe_allow_html=True)
+        
+        # Gumbi za hitre akcije (Minimizirano s pomočjo expanderja)
+        with st.expander(f"Upravljanje mape: {f_name}"):
+            c1, c2 = st.columns(2)
+            if c1.button("📖 Uči", key=f"l_{f_name}"):
+                st.session_state.current_folder, st.session_state.page, st.session_state.card_index = f_name, "learning", 0
+                st.rerun()
+            if c2.button("📝 Test", key=f"t_{f_name}"):
+                st.session_state.current_folder, st.session_state.page, st.session_state.card_index = f_name, "testing", 0
+                st.rerun()
+            
+            st.divider()
+            st.subheader("Urejanje")
+            
+            # 1. Barva in Ime
+            new_name = st.text_input("Preimenuj mapo", f_name, key=f"rn_{f_name}")
+            new_color = st.color_picker("Barva mape", folder["color"], key=f"cp_{f_name}")
+            
+            # 2. Urejanje snovi in vprašanj
+            edit_vpr = st.text_area("Vprašanja (za AI)", folder.get("prompts", ""), key=f"ev_{f_name}")
+            edit_snov = st.text_area("Snov / Gradivo", folder.get("source", ""), key=f"es_{f_name}")
+            
+            col_save, col_del = st.columns(2)
+            if col_save.button("Shrani spremembe", key=f"sv_{f_name}"):
+                # Posodobi podatke
+                updated_folder = folder.copy()
+                updated_folder["color"] = new_color
+                updated_folder["prompts"] = edit_vpr
+                updated_folder["source"] = edit_snov
+                
+                # Če se ime spremeni, zamenjaj ključ v diktu
+                del data["folders"][st.session_state.user][f_name]
+                data["folders"][st.session_state.user][new_name] = updated_folder
+                save_data(data); st.rerun()
+                
+            if col_del.button("🗑️ Izbriši mapo", key=f"dl_{f_name}"):
+                del data["folders"][st.session_state.user][f_name]
+                save_data(data); st.rerun()
+
+elif st.session_state.page == "learning":
+    # (Logika učenja ostaja ista, le pot do kartic je zdaj folder["cards"])
+    folder_data = data["folders"][st.session_state.user][st.session_state.current_folder]
+    folder = folder_data["cards"]
     if st.button("🏠 Domov"): st.session_state.page = "home"; st.rerun()
     
     if st.session_state.card_index < len(folder):
         card = folder[st.session_state.card_index]
         st.progress(st.session_state.card_index / len(folder))
-        
-        status_txt = "POZNAM" if card.get('known') else "ŠE NE POZNAM"
-        st.markdown(f"<div class='status-box'>{status_txt}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='status-box' style='color:{folder_data['color']}'>KARTICA {st.session_state.card_index + 1}</div>", unsafe_allow_html=True)
         
         vsebina = card['a'] if st.session_state.flipped else card['q']
         st.markdown('<div class="flip-btn">', unsafe_allow_html=True)
@@ -161,49 +174,32 @@ elif st.session_state.page == "learning":
         st.markdown('</div>', unsafe_allow_html=True)
 
         if st.button("✅ ZNAM"):
-            data["folders"][st.session_state.user][st.session_state.current_folder][st.session_state.card_index]['known'] = True
-            save_data(data)
-            st.session_state.card_index += 1
-            st.session_state.flipped = False
-            st.rerun()
-        st.markdown("<div style='margin-top:10px'></div>", unsafe_allow_html=True)
+            data["folders"][st.session_state.user][st.session_state.current_folder]["cards"][st.session_state.card_index]['known'] = True
+            save_data(data); st.session_state.card_index += 1; st.session_state.flipped = False; st.rerun()
+        st.write("")
         if st.button("❌ NE ZNAM"):
-            data["folders"][st.session_state.user][st.session_state.current_folder][st.session_state.card_index]['known'] = False
-            save_data(data)
-            st.session_state.card_index += 1
-            st.session_state.flipped = False
-            st.rerun()
+            data["folders"][st.session_state.user][st.session_state.current_folder]["cards"][st.session_state.card_index]['known'] = False
+            save_data(data); st.session_state.card_index += 1; st.session_state.flipped = False; st.rerun()
     else:
-        st.success("Mapa končana!")
-        if st.button("Nazaj na domov"): st.session_state.page = "home"; st.rerun()
+        st.success("Končano!")
+        if st.button("Domov"): st.session_state.page = "home"; st.rerun()
 
-# --- TESTIRANJE ---
+# --- TESTING (Logika podobna learning) ---
 elif st.session_state.page == "testing":
-    user_folders = data["folders"][st.session_state.user]
-    folder = user_folders[st.session_state.current_folder]
+    folder_data = data["folders"][st.session_state.user][st.session_state.current_folder]
+    folder = folder_data["cards"]
     if st.button("🏠 Domov"): st.session_state.page = "home"; st.rerun()
-
     if st.session_state.card_index < len(folder):
         card = folder[st.session_state.card_index]
-        st.info(f"**Vprašanje:** {card['q']}")
-        user_ans = st.text_input("Tvoj odgovor:", key=f"test_{st.session_state.card_index}")
-        
-        if st.button("PREVERI"): st.session_state.flipped = True
-            
+        st.info(f"Vprašanje: {card['q']}")
+        user_ans = st.text_input("Odgovor:", key=f"t_{st.session_state.card_index}")
+        if st.button("Preveri"): st.session_state.flipped = True
         if st.session_state.flipped:
-            st.write(f"**Pravilen:** {card['a']}")
-            if st.button("✅ OZNAČI KOT PRAVILNO"):
-                data["folders"][st.session_state.user][st.session_state.current_folder][st.session_state.card_index]['known'] = True
-                save_data(data)
-                st.session_state.card_index += 1
-                st.session_state.flipped = False
-                st.rerun()
-            if st.button("❌ OZNAČI KOT NAPAČNO"):
-                data["folders"][st.session_state.user][st.session_state.current_folder][st.session_state.card_index]['known'] = False
-                save_data(data)
-                st.session_state.card_index += 1
-                st.session_state.flipped = False
-                st.rerun()
-    else:
-        st.success("Test končan!")
-        if st.button("Domov"): st.session_state.page = "home"; st.rerun()
+            st.write(f"Pravilen: {card['a']}")
+            if st.button("✅ PRAVILNO"):
+                data["folders"][st.session_state.user][st.session_state.current_folder]["cards"][st.session_state.card_index]['known'] = True
+                save_data(data); st.session_state.card_index += 1; st.session_state.flipped = False; st.rerun()
+            if st.button("❌ NAPAČNO"):
+                data["folders"][st.session_state.user][st.session_state.current_folder]["cards"][st.session_state.card_index]['known'] = False
+                save_data(data); st.session_state.card_index += 1; st.session_state.flipped = False; st.rerun()
+    else: st.session_state.page = "home"; st.rerun()
